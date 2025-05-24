@@ -1,23 +1,4 @@
-# Welcome to Serverless!
-#
-# This file is the main config file for your service.
-# It's very minimal at this point and uses default values.
-# You can always add more config options for more control.
-# We've included some commented out config examples here.
-# Just uncomment any of them to get that config option.
-#
-# For full config options, check the docs:
-#    docs.serverless.com
-#
-# Happy Coding!
-
 service: lab5
-# app and org for use with dashboard.serverless.com
-#app: your-app-name
-#org: your-org-name
-
-# You can pin your service to only deploy with a specific Serverless version
-# Check out our docs for more details
 frameworkVersion: "3"
 
 provider:
@@ -25,31 +6,23 @@ provider:
   runtime: nodejs18.x
 
 functions:
-  postOrganization:
-    handler: handler.postOrganization
+  sqsHandler:
+    handler: handler.sqsHandler
     events:
-      - httpApi:
-          method: POST
-          path: /organizations
-  postUser:
-    handler: handler.postUser
-    events:
-      - httpApi:
-          method: POST
-          path: /organizations/{orgId}/users
-  putOrganization:
-    handler: handler.putOrganization
-    events:
-      - httpApi:
-          method: PUT
-          path: /organizations
-  putUser:
-    handler: handler.putUser
-    events:
-      - httpApi:
-          method: PUT
-          path: /organizations/{orgId}/users
+      - sqs:
+          arn:
+            Fn::GetAtt:
+              - MainQueue
+              - Arn
 custom:
+  serverless-offline-sqs:
+    autoCreate: true
+    apiVersion: '2012-11-05'
+    endpoint: http://localhost:9324
+    region: eu-west-1
+    accessKeyId: root
+    secretAccessKey: root
+  
   serverless-dynamodb:
     start:
       port: 8000
@@ -58,9 +31,9 @@ custom:
       inMemory: true
       migrate: true
 
-resources: # CloudFormation template syntax
+resources:
   Resources:
-    usersTable:
+    UsersTable:
       Type: AWS::DynamoDB::Table
       Properties:
         TableName: usersTable
@@ -79,7 +52,7 @@ resources: # CloudFormation template syntax
                 KeyType: HASH
             Projection:
               ProjectionType: ALL
-    organizationsTable:
+    OrganizationsTable:
       Type: AWS::DynamoDB::Table
       Properties:
         TableName: organizationsTable
@@ -98,7 +71,12 @@ resources: # CloudFormation template syntax
                 KeyType: HASH
             Projection:
               ProjectionType: ALL
+    MainQueue:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: main-queue
 
 plugins:
   - serverless-dynamodb
+  - serverless-offline-sqs
   - serverless-offline

@@ -75,8 +75,7 @@ function getUserById(userId){
 }
 
 async function orgExistsById(orgId) {
-  let result = await performCommand(GetCommand,
-    {
+  let result = await performGet({
       TableName: ORGANIZATIONS_TABLE,
       Key: {
         orgId: orgId
@@ -91,7 +90,7 @@ async function orgExistsById(orgId) {
 }
 
 async function userExistsByEmail(email, excludeUserId = null) {
-  const result = await performCommand(QueryCommand, {
+  const result = await perfromQuery({
     TableName: USERS_TABLE,
     IndexName: 'email-index',
     KeyConditionExpression: 'email = :email',
@@ -104,7 +103,7 @@ async function userExistsByEmail(email, excludeUserId = null) {
 }
 
 async function orgExistsByName(nameValue) {
-  const queryResult = await performCommand(QueryCommand, {
+  const queryResult = await perfromQuery({
     TableName: ORGANIZATIONS_TABLE,
     IndexName: 'name-index',
     KeyConditionExpression: '#n = :name',
@@ -133,6 +132,10 @@ function performPut(params) {
 
 function performUpdate(params) {
     return performCommand(UpdateCommand, params)
+}
+
+function perfromQuery(params){
+  return performCommand(QueryCommand, params)
 }
 
 function getUpdateParams(updates) {

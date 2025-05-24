@@ -13,6 +13,7 @@ const postOrgSchema = yup.object({
 });
 
 const postUserSchema = yup.object({
+    orgId: yup.string().trim().required('OrgId is required'),
     name: yup.string().trim().required('Name is required'),
     email: yup.string().email('Invalid email').trim().required('Email is required'),
 });
@@ -24,6 +25,7 @@ const putOrgSchema = yup.object({
 });
 
 const putUserSchema = yup.object({
+    orgId: yup.string().trim().required('OrgId is required'),
     userId: yup.string().required('User ID is required'),
     name: yup.string().trim(),
     email: yup.string().email('Invalid email').trim()

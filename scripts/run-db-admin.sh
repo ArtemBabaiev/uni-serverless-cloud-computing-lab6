@@ -1,0 +1,1 @@
+(DYNAMO_ENDPOINT=http://localhost:8000 AWS_REGION=eu-west-1 dynamodb-admin)

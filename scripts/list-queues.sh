@@ -1,0 +1,1 @@
+aws --endpoint-url=http://localhost:9324 sqs list-queues --region eu-west-1
