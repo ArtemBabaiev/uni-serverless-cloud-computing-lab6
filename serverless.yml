@@ -1,8 +1,9 @@
-service: lab5
+service: lab6
 frameworkVersion: "3"
 
 provider:
   name: aws
+  region: eu-west-1
   runtime: nodejs18.x
 
 functions:
