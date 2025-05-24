@@ -1,53 +1,21 @@
 'use strict';
+const dbModule = require('./dbModule')
+const validationModule = require('./validationModule')
 
-const yup = require('yup');
 const { v4: uuidv4 } = require('uuid');
-const { DynamoDBClient } = require("@aws-sdk/client-dynamodb");
-const { DynamoDBDocumentClient, PutCommand, GetCommand, QueryCommand, UpdateCommand } = require("@aws-sdk/lib-dynamodb");
 
 
-const postOrgSchema = yup.object({
-  name: yup.string().trim().required('Name is required'),
-  description: yup.string().trim().required('Description is required')
-});
-
-const postUserSchema = yup.object({
-  name: yup.string().trim().required('Name is required'),
-  email: yup.string().email('Invalid email').trim().required('Email is required'),
-});
-
-const putOrgSchema = yup.object({
-  orgId: yup.string().required("Organization Id is required"),
-  name: yup.string().trim(),
-  description: yup.string().trim()
-});
-
-const putUserSchema = yup.object({
-  userId: yup.string().required('User ID is required'),
-  name: yup.string().trim(),
-  email: yup.string().email('Invalid email').trim()
-});
-
-const ORGANIZATIONS_TABLE = 'organizationsTable';
-const USERS_TABLE = 'usersTable';
-
-const client = new DynamoDBClient({
-  region: 'eu-west-1',
-  endpoint: 'http://0.0.0.0:8000',
-  credentials: {
-    accessKeyId: 'MockAccessKeyId',
-    secretAccessKey: 'MockSecretAccessKey'
-  },
-});
-
-const docClient = DynamoDBDocumentClient.from(client);
 
 module.exports.postOrganization = async (event) => {
   try {
     let body = extractBody(event)
-    let organization = validate(body, postOrgSchema);
+    let organization = validationModule.validatePostOrganization(body);
 
-    if (await orgExistsByName(organization.name)) {
+    if (organization.errorMessage) {
+      throw new RequestException(400, organization.errorMessage);
+    }
+
+    if (await dbModule.orgExistsByName(organization.name)) {
       throw new RequestException(400, "Organization with this name already exists");
     }
 
@@ -56,12 +24,8 @@ module.exports.postOrganization = async (event) => {
       ...organization
     }
 
-    await performCommand(PutCommand,
-      {
-        TableName: ORGANIZATIONS_TABLE,
-        Item: item
-      }
-    )
+    await dbModule.saveOrganization(item)
+
     return getResponseObject(200, item)
   } catch (error) {
     return handleError(error);
@@ -72,15 +36,19 @@ module.exports.postUser = async (event) => {
   try {
     const orgId = event.pathParameters.orgId;
 
-    if (!(await orgExistsById(orgId))) {
+    if (!(await dbModule.orgExistsById(orgId))) {
       throw new RequestException(400, "Organization not found");
     }
 
     let body = extractBody(event)
 
-    let user = validate(body, postUserSchema);
+    let user = validationModule.validatePostUser(body);
 
-    if (await userExistsByEmail(user.email)) {
+    if (user.errorMessage) {
+      throw new RequestException(400, user.errorMessage);
+    }
+
+    if (await dbModule.userExistsByEmail(user.email)) {
       throw new RequestException(400, "User with this email already exists");
     }
 
@@ -90,10 +58,7 @@ module.exports.postUser = async (event) => {
       ...user
     }
 
-    await performCommand(PutCommand, {
-      TableName: USERS_TABLE,
-      Item: item
-    })
+    await dbModule.saveUser(item)
 
     return getResponseObject(200, item)
   } catch (error) {
@@ -104,37 +69,30 @@ module.exports.postUser = async (event) => {
 module.exports.putOrganization = async (event) => {
   try {
     let body = extractBody(event)
-    let organization = validate(body, putOrgSchema);
+    let organization = validationModule.validatePutOrganization(body);
 
-    if (!(await orgExistsById(organization.orgId))) {
+    if (organization.errorMessage) {
+      throw new RequestException(400, organization.errorMessage);
+    }
+
+    if (!(await dbModule.orgExistsById(organization.orgId))) {
       throw new RequestException(404, 'Organization not found');
     }
 
     let updates = {};
     if (organization.name !== undefined) {
       updates.name = organization.name
-      if (await orgExistsByName(organization.name)) {
+      if (await dbModule.orgExistsByName(organization.name)) {
         throw new RequestException(400, "Organization with this name already exists");
       }
     };
     if (organization.description !== undefined) updates.description = organization.description;
 
-    if (Object.keys(updates).length === 0) {
+    if (isEmpty(updates)) {
       throw new RequestException(400, 'At least one of name or description must be provided');
     }
 
-    let params = getUpdateParams(updates)
-
-    let result = await performCommand(UpdateCommand, {
-      TableName: ORGANIZATIONS_TABLE,
-      Key: {
-        orgId: organization.orgId
-      },
-      UpdateExpression: params.expression,
-      ExpressionAttributeNames: params.attributesNames,
-      ExpressionAttributeValues: params.attributesValues,
-      ReturnValues: 'ALL_NEW'
-    })
+    let result = await dbModule.updateOrganization(organization.orgId, updates)
 
     return getResponseObject(200, result.Attributes);
   } catch (error) {
@@ -146,22 +104,23 @@ module.exports.putUser = async (event) => {
   try {
     const orgId = event.pathParameters.orgId;
     const body = extractBody(event);
-    const user = validate(body, putUserSchema);
+    const user = validationModule.validatePutUser(body);
 
-    if (!(await orgExistsById(orgId))) {
+    if (user.errorMessage) {
+      throw new RequestException(400, user.errorMessage);
+    }
+
+    if (!(await dbModule.orgExistsById(orgId))) {
       throw new RequestException(400, "Organization not found");
     }
 
-    const getResult = await performCommand(GetCommand, {
-      TableName: USERS_TABLE,
-      Key: { userId: user.userId }
-    });
+    const userResult = await dbModule.getUserById(user.userId);
 
-    if (!getResult.Item) {
+    if (!userResult.Item) {
       throw new RequestException(404, 'User not found');
     }
 
-    if (getResult.Item.orgId !== orgId) {
+    if (userResult.Item.orgId !== orgId) {
       throw new RequestException(403, 'User does not belong to the specified organization');
     }
 
@@ -169,25 +128,16 @@ module.exports.putUser = async (event) => {
     if (user.name !== undefined) updates.name = user.name;
     if (user.email !== undefined) {
       updates.email = user.email
-      if (await userExistsByEmail(user.email, user.userId)) {
+      if (await dbModule.userExistsByEmail(user.email, user.userId)) {
         throw new RequestException(400, "User with this email already exists");
       }
     };
 
-    if (Object.keys(updates).length === 0) {
+    if (isEmpty(updates)) {
       throw new RequestException(400, 'At least one of name or email must be provided');
     }
 
-    let params = getUpdateParams(updates)
-
-    const result = await performCommand(UpdateCommand, {
-      TableName: USERS_TABLE,
-      Key: { userId: user.userId },
-      UpdateExpression: params.expression,
-      ExpressionAttributeNames: params.attributesNames,
-      ExpressionAttributeValues: params.attributesValues,
-      ReturnValues: 'ALL_NEW'
-    });
+    const result = await dbModule.updateUser(user.userId, updates);
 
     return getResponseObject(200, result.Attributes);
   } catch (error) {
@@ -210,14 +160,6 @@ function extractBody(event) {
   }
 }
 
-function validate(obj, schema) {
-  try {
-    return schema.validateSync(obj, { abortEarly: false, strict: true })
-  } catch (error) {
-    throw new RequestException(400, error.errors.join(" "));
-  }
-}
-
 function handleError(error) {
   if (error instanceof RequestException) {
     return getResponseObject(error.code, {
@@ -230,68 +172,10 @@ function handleError(error) {
   })
 }
 
-function performCommand(CommandClass, params) {
-  return docClient.send(new CommandClass(params));
+function isEmpty(obj) {
+  return !obj || Object.keys(obj).length === 0;
 }
 
-async function orgExistsByName(nameValue) {
-  const queryResult = await performCommand(QueryCommand, {
-    TableName: ORGANIZATIONS_TABLE,
-    IndexName: 'name-index',
-    KeyConditionExpression: '#n = :name',
-    ExpressionAttributeNames: {
-      '#n': 'name'
-    },
-    ExpressionAttributeValues: {
-      ':name': nameValue
-    }
-  });
-
-  return queryResult.Items.length > 0;
-}
-
-async function userExistsByEmail(email, excludeUserId = null) {
-  const result = await performCommand(QueryCommand, {
-    TableName: USERS_TABLE,
-    IndexName: 'email-index',
-    KeyConditionExpression: 'email = :email',
-    ExpressionAttributeValues: {
-      ':email': email
-    }
-  });
-
-  return result.Items.some(user => user.userId !== excludeUserId);
-}
-
-async function orgExistsById(orgId) {
-  let result = await performCommand(GetCommand,
-    {
-      TableName: ORGANIZATIONS_TABLE,
-      Key: {
-        orgId: orgId
-      }
-    }
-  );
-
-  if (result.Item) {
-    return true;
-  }
-  return false;
-}
-
-function getUpdateParams(updates) {
-  let expression = 'SET ' + Object.keys(updates)
-    .map((key, index) => `#${key} = :${key}`)
-    .join(', ');
-  let attributesNames = {}
-  let attributesValues = {}
-  Object.keys(updates).forEach((key, index) => {
-    attributesNames[`#${key}`] = `${key}`;
-    attributesValues[`:${key}`] = updates[`${key}`];
-  });
-
-  return { expression, attributesNames, attributesValues }
-}
 class RequestException extends Error {
   constructor(code, message) {
     super(message);
